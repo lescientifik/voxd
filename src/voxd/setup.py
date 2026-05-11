@@ -49,6 +49,17 @@ _NEW_SWAY_MAIN = f"""# Created by `voxd setup` — minimal stub.
 {_INCLUDE_LINE}
 """
 
+# Path to the distro-provided sway config (Fedora, Debian, Arch all ship one).
+# Exposed as a module-level constant so tests can monkey-patch it.
+_SYSTEM_DEFAULT_PATH: Path = Path("/etc/sway/config")
+
+_COPIED_HEADER = """\
+# Copied from /etc/sway/config by `voxd setup` — edit to your liking.
+# The include directive at the bottom of this file already loads
+# ~/.config/sway/config.d/*.conf (including voxd.conf), so a `swaymsg reload`
+# picks up changes there without further edits here.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -133,19 +144,46 @@ def _write_if_different(path: Path, content: str, *, mode: int = 0o644) -> bool:
 def _ensure_include_line(main_config: Path) -> str:
     """Make sure ``main_config`` contains the ``include`` directive.
 
-    Returns a short status string ("added", "present", "created") used to
-    shape the final user-facing message. Idempotent: a file that already
-    contains the directive is left untouched.
+    Returns a short status string used to shape the final user-facing
+    message. Idempotent: a file that already contains the directive is
+    left untouched.
+
+    Possible return values:
+
+    - ``"created-from-default"`` — ``main_config`` did not exist and we copied
+      the distro-provided ``/etc/sway/config`` verbatim (with a voxd header).
+      Crucially we do NOT append our own ``include`` line in this case: the
+      system default already wires up ``config.d`` (e.g. Fedora's
+      ``layered-include``), and short-circuiting that would drop user-visible
+      defaults (workspace bindings, etc.).
+    - ``"created"`` — ``main_config`` did not exist and no system default was
+      available, so we wrote a minimal stub containing just the include line.
+    - ``"added"`` — ``main_config`` existed without the include line; we
+      appended it.
+    - ``"present"`` — ``main_config`` already wires up ``config.d`` (either
+      via the canonical line or an equivalent like ``layered-include``); we
+      did nothing.
     """
     if not main_config.exists():
         main_config.parent.mkdir(parents=True, exist_ok=True)
+        if _SYSTEM_DEFAULT_PATH.exists():
+            # Preserve the distro defaults (bindings, layered-include, etc.)
+            # by copying them into the user's config rather than masking them
+            # with a one-line stub.
+            system_body = _SYSTEM_DEFAULT_PATH.read_text(encoding="utf-8")
+            main_config.write_text(
+                _COPIED_HEADER + "\n" + system_body, encoding="utf-8"
+            )
+            os.chmod(main_config, 0o644)
+            return "created-from-default"
         main_config.write_text(_NEW_SWAY_MAIN, encoding="utf-8")
         os.chmod(main_config, 0o644)
         return "created"
 
     body = main_config.read_text(encoding="utf-8")
     # Match the canonical line; also tolerate the user having added their own
-    # equivalent (e.g. an absolute path) — leave their file alone if so.
+    # equivalent (e.g. an absolute path or `layered-include`) — leave their
+    # file alone if so.
     if _INCLUDE_LINE in body:
         return "present"
     if "include " in body and "config.d" in body:
@@ -212,6 +250,7 @@ def _print_summary(
         "added": "include line added",
         "present": "include line already present",
         "created": "created (minimal stub)",
+        "created-from-default": "created (copied from /etc/sway/config)",
     }[main_status]
 
     print(f"  config:  {config_path}")

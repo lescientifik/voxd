@@ -133,9 +133,20 @@ def test_setup_adds_include_line_if_missing(
 
 
 def test_setup_does_not_duplicate_include_line(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Running setup twice keeps the include line exactly once."""
+    """Running setup twice keeps the include line exactly once.
+
+    The system-default-copy branch is irrelevant here: we explicitly exercise
+    the minimal-stub branch (which owns the canonical include line) by
+    pointing ``_SYSTEM_DEFAULT_PATH`` at a non-existent file. Idempotence of
+    the copy branch is covered indirectly by the snippet-mtime test and by
+    the absence of mutation when the line is already present.
+    """
+    monkeypatch.setattr(
+        setup_mod, "_SYSTEM_DEFAULT_PATH", tmp_path / "nonexistent-sway-config"
+    )
+
     _set_inputs(monkeypatch)
 
     setup_mod.main()
@@ -284,17 +295,21 @@ def test_setup_prints_final_message(
 
 
 # ---------------------------------------------------------------------------
-# Bonus: when the sway main config is missing entirely, we create it with
-# just the include directive (and a comment header).
+# Bonus: when the sway main config is missing and NO system default exists,
+# we create a minimal stub with just the include directive (and a comment).
 # ---------------------------------------------------------------------------
 
 
-def test_setup_creates_sway_main_config_when_missing(
-    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+def test_setup_creates_minimal_stub_when_no_system_default(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """No sway main config -> create one with just the include line + comment."""
-    _set_inputs(monkeypatch)
+    """No system default sway config -> create minimal stub with include line."""
+    # Point the system-default path at a file that does not exist.
+    monkeypatch.setattr(
+        setup_mod, "_SYSTEM_DEFAULT_PATH", tmp_path / "nonexistent-sway-config"
+    )
 
+    _set_inputs(monkeypatch)
     setup_mod.main()
 
     main_config = isolated_home / ".config" / "sway" / "config"
@@ -304,6 +319,57 @@ def test_setup_creates_sway_main_config_when_missing(
     # We expect at least one comment line explaining the file
     assert body.lstrip().startswith("#"), (
         "freshly created main sway config should start with a comment"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bonus: when the sway main config is missing BUT /etc/sway/config exists
+# (the Fedora case), we copy the system default to preserve user-visible
+# defaults like Mod4+1..5 workspace switches and the layered-include.
+# ---------------------------------------------------------------------------
+
+
+def test_setup_copies_system_default_when_main_config_missing_and_system_default_exists(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """System default exists -> copy it verbatim with a voxd-setup header.
+
+    Crucial: do NOT append our own `include ~/.config/sway/config.d/*` —
+    the system default already wires up config.d via `layered-include` (or
+    similar). Appending ours would either duplicate or shadow that.
+    """
+    # Fake system default with realistic content: the Fedora layered-include
+    # plus a sample bindsym that the user relies on.
+    fake_system_default = tmp_path / "fake-etc-sway-config"
+    fake_system_default.write_text(
+        "### Sway default config (fake) ###\n"
+        "set $mod Mod4\n"
+        "bindsym $mod+1 workspace number 1\n"
+        "layered-include /usr/share/sway/config.d/*.conf "
+        "/etc/sway/config.d/*.conf "
+        "~/.config/sway/config.d/*.conf\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(setup_mod, "_SYSTEM_DEFAULT_PATH", fake_system_default)
+
+    _set_inputs(monkeypatch)
+    setup_mod.main()
+
+    main_config = isolated_home / ".config" / "sway" / "config"
+    assert main_config.exists()
+    body = main_config.read_text(encoding="utf-8")
+
+    # Header inserted by voxd setup
+    assert "voxd setup" in body, "header should mention voxd setup"
+    # Full system default content preserved
+    assert "set $mod Mod4" in body
+    assert "bindsym $mod+1 workspace number 1" in body
+    assert "layered-include" in body
+    # And critically: we did NOT append our own include line, because the
+    # system default already loads config.d via its own directive.
+    assert "include ~/.config/sway/config.d/*\n" not in body, (
+        "voxd setup must NOT append its own include line when the system "
+        "default already wires up config.d (here via layered-include)."
     )
 
 
