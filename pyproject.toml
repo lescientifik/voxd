@@ -1,0 +1,45 @@
+[project]
+name = "voxd"
+version = "0.1.0"
+description = "Headless voice-to-text daemon — OpenRouter transcription via SIGUSR2 toggle, for Wayland/sway."
+readme = "README.md"
+authors = [
+    { name = "lescientifik", email = "18367137+lescientifik@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "sounddevice>=0.4",
+    "numpy>=2.0",
+    "onnxruntime>=1.18",
+    "httpx>=0.27",
+    "soxr>=0.5",
+    "tomlkit>=0.13",
+]
+
+[project.scripts]
+voxd = "voxd.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.15",
+    "ty>=0.0.35",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.ty.src]
+include = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
