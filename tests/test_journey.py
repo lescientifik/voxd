@@ -137,8 +137,9 @@ def test_full_user_journey(
     wt_calls = capture_subprocess.calls("wtype")
     assert wl_calls, "wl-copy should have been called"
     assert wt_calls, "wtype should have been called"
+    # Text rides the clipboard now; wtype only fires the Ctrl+V combo.
     assert wl_calls[-1].stdin == "journey complete"
-    assert wt_calls[-1].argv[-1] == "journey complete"
+    assert "v" in wt_calls[-1].argv and "ctrl" in wt_calls[-1].argv
     assert mock_openrouter_server.request_count == 1, (
         "exactly one transcription request should have been sent"
     )

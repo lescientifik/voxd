@@ -121,8 +121,10 @@ def test_full_cycle_record_transcribe_inject(
     wt_calls = capture_subprocess.calls("wtype")
     assert wl_calls, "expected at least one wl-copy invocation"
     assert wt_calls, "expected at least one wtype invocation"
+    # The transcribed text now flows through the clipboard channel only; wtype
+    # synthesises a Ctrl+V keystroke and never sees the text in argv.
     assert wl_calls[-1].stdin == "hello world"
-    assert wt_calls[-1].argv[-1] == "hello world"
+    assert "v" in wt_calls[-1].argv and "ctrl" in wt_calls[-1].argv
     assert mock_openrouter_server.request_count == 1
 
 
@@ -180,9 +182,15 @@ def test_double_toggle_during_upload_queues_second_recording(
     _run(scenario())
 
     wt_calls = capture_subprocess.calls("wtype")
+    wl_calls = capture_subprocess.calls("wl-copy")
     assert len(wt_calls) == 2, f"expected 2 wtype calls, got {len(wt_calls)}"
-    assert wt_calls[0].argv[-1] == "first"
-    assert wt_calls[1].argv[-1] == "second"
+    # FIFO ordering is visible on the clipboard channel: the transcribed
+    # text is what's submitted through wl-copy (wtype now only fires keystroke
+    # combos, never the text itself).
+    wl_texts = [c.stdin for c in wl_calls]
+    assert wl_texts == ["first", "second"], (
+        f"wl-copy must see first then second; got {wl_texts}"
+    )
     assert mock_openrouter_server.request_count == 2
 
 
@@ -394,8 +402,12 @@ def test_5xx_retries_then_inject(
 
     assert mock_openrouter_server.request_count == 3
     wt_calls = capture_subprocess.calls("wtype")
+    wl_calls = capture_subprocess.calls("wl-copy")
     assert len(wt_calls) == 1
-    assert wt_calls[0].argv[-1] == "retried"
+    # After the two retries succeed, the eventual text goes to the clipboard
+    # and wtype only fires the paste keystroke combo.
+    assert wl_calls[-1].stdin == "retried"
+    assert "v" in wt_calls[0].argv and "ctrl" in wt_calls[0].argv
 
 
 # ---------------------------------------------------------------------------
