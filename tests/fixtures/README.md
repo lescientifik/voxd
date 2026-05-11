@@ -16,6 +16,19 @@ espeak-ng -v fr -s 145 -w /tmp/_speech_fr_raw.wav \
 sox /tmp/_speech_fr_raw.wav -r 16000 -c 1 -b 16 tests/fixtures/speech_fr.wav
 ```
 
+## `speech_44k.wav`
+
+Same French utterance as `speech_fr.wav`, but at the non-native sample rate
+**44.1 kHz** mono int16. Used by `tests/test_audio.py` to drive the capture
+pipeline through `soxr.ResampleStream` (44.1 kHz → 16 kHz) and verify that
+480-sample frames come out clean.
+
+```bash
+espeak-ng -v fr -s 145 -w /tmp/_speech_44k_raw.wav \
+    "Bonjour, ceci est un test de transcription vocale française."
+sox /tmp/_speech_44k_raw.wav -r 44100 -c 1 -b 16 tests/fixtures/speech_44k.wav
+```
+
 ## `silence.wav`
 
 3 s of silence (zero samples), 16 kHz mono int16. Generated with:
