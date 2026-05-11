@@ -15,9 +15,11 @@ These tests pin the contract:
   (the user may run another wlroots compositor where wtype works fine);
 * microphone access failures are warnings (the user may simply not have
   plugged a mic in), not exit-code-flipping errors;
-* the exit code is 0 iff no *critical* check failed (``wtype`` and
-  PortAudio are the two critical ones — without them voxd cannot
-  function at all).
+* the exit code is 0 iff no *critical* check failed (``wtype``,
+  ``wl-copy`` and PortAudio are the three critical ones — without them
+  voxd cannot function at all: ``wl-copy`` is critical because the
+  injection pipeline pastes via Ctrl+V, so the transcript must be on the
+  clipboard first).
 
 We import sounddevice lazily through ``doctor._import_sounddevice`` so
 the import-error test can monkey-patch a single, stable seam.
@@ -293,14 +295,15 @@ def test_doctor_exit_code_zero_when_only_warnings(
     good_sounddevice: None,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Non-critical issues (wl-copy missing, GNOME, mic denied) → still 0.
+    """Non-critical issues (notify-send missing, GNOME, mic denied) → still 0.
 
-    Documents the critical-vs-warning split: only ``wtype`` and PortAudio
-    are critical. ``wl-copy`` and ``notify-send`` are graceful-degradation
-    (user can still type-inject without clipboard, daemon survives without
-    notifications), and desktop / mic are environmental warnings.
+    Documents the critical-vs-warning split post-paste-via-Ctrl+V refactor:
+    ``wtype``, ``wl-copy`` and PortAudio are critical (the injection pipeline
+    can't function without any of them). ``notify-send`` is graceful-
+    degradation (only used to nudge the user on Xwayland apps), and
+    desktop / mic are environmental warnings.
     """
-    monkeypatch.setattr(shutil, "which", _make_which_stub(missing={"wl-copy", "notify-send"}))
+    monkeypatch.setattr(shutil, "which", _make_which_stub(missing={"notify-send"}))
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "GNOME")
     mod = _fake_sounddevice_module(open_raises=OSError("no device"))
     monkeypatch.setattr(doctor, "_import_sounddevice", lambda: mod)
@@ -309,12 +312,38 @@ def test_doctor_exit_code_zero_when_only_warnings(
     out = capsys.readouterr().out
 
     # Everything we expected to be a warning is reported as such.
-    assert "wl-copy: MISSING" in out
     assert "notify-send: MISSING" in out
     assert "Desktop:" in out and "GNOME" in out
     assert "Mic access: DENIED" in out
     # And yet — none of these is critical, so exit code stays 0.
     assert rc == 0
+
+
+def test_wlcopy_missing_is_critical(
+    monkeypatch: pytest.MonkeyPatch,
+    sway_desktop: None,
+    good_sounddevice: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``shutil.which("wl-copy") -> None`` flips the exit code to 1.
+
+    The injection pipeline pastes via Ctrl+V, so the transcript must land
+    on the clipboard first via ``wl-copy``. Without it, the Ctrl+V keystroke
+    pastes whatever was previously on the clipboard — actively wrong, not a
+    graceful degradation — so ``wl-copy`` is a hard critical dependency.
+    """
+    monkeypatch.setattr(shutil, "which", _make_which_stub(missing={"wl-copy"}))
+
+    checks = doctor._run_checks()
+    wlcopy = next(c for c in checks if c.name == "wl-copy")
+    assert wlcopy.critical is True
+    assert wlcopy.status is doctor._Status.MISSING
+
+    rc = doctor.main()
+    out = capsys.readouterr().out
+
+    assert "wl-copy: MISSING" in out
+    assert rc == 1
 
 
 # ---------------------------------------------------------------------------

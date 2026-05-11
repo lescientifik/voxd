@@ -9,12 +9,35 @@ Controlled by SIGUSR2 (toggle start/stop) — no GUI, no overlay, no tray.
 ```
 SIGUSR2 -> daemon -> sounddevice capture -> Silero VAD (trims silence)
        -> POST /audio/transcriptions @ OpenRouter
-       -> wl-copy <text> + wtype <text>   (FIFO-serialized)
+       -> wl-copy <text> + wtype <paste-keystroke>   (FIFO-serialized)
 ```
 
 A single toggle binding (`Ctrl+Alt+Space`) starts recording; the next one stops
-it, uploads the speech-trimmed WAV to OpenRouter, and pastes the transcription
-into the focused window.
+it, uploads the speech-trimmed WAV to OpenRouter, copies the transcription onto
+the clipboard, and synthesises the paste keystroke for the focused window.
+
+## How injection works
+
+Injection runs in two steps: `wl-copy` puts the transcription on the Wayland
+clipboard, then `wtype` synthesises the paste keystroke appropriate to the
+focused window. voxd inspects `swaymsg -t get_tree` to pick the right combo:
+
+- **Wayland-native terminal** (`foot`, `Alacritty`, `kitty`, `wezterm`,
+  `ghostty`) — sends `Ctrl+Shift+V` (terminals reserve plain `Ctrl+V` for
+  their own bindings).
+- **Other Wayland-native app** (Firefox, Slack, VS Code Wayland, …) — sends
+  `Ctrl+V`.
+- **Xwayland app** (older apps, some Electron builds) — voxd does *not* send
+  any keystroke (`wtype` cannot drive Xwayland windows, see
+  [`atx/wtype#62`](https://github.com/atx/wtype/issues/62)). Instead it pops
+  a `notify-send` reminder; the transcription is on the clipboard, just paste
+  manually with `Ctrl+V` or `Ctrl+Shift+V`.
+- **Unknown focus / non-sway compositor** (Hyprland, labwc, edge cases where
+  `swaymsg` is absent or returns no focused container) — falls back to plain
+  `Ctrl+V`, which works on most wlroots-based compositors.
+
+No text is ever typed character by character — paste-via-keystroke avoids the
+character-loss bugs in `wtype` ([`atx/wtype#46`](https://github.com/atx/wtype/issues/46)).
 
 ## Install
 
@@ -70,9 +93,12 @@ voxd doctor
 
 Prints a one-line verdict per dependency:
 
-- `wtype` — required for keystroke injection (critical).
-- `wl-copy` — required for clipboard mirroring (warning).
-- `notify-send` — required for the on-screen status hint (warning).
+- `wtype` — required for the paste keystroke (critical).
+- `wl-copy` — required to land the transcription on the clipboard before
+  the paste keystroke fires; without it, `Ctrl+V` would paste the previous
+  clipboard contents (critical).
+- `notify-send` — used to nudge the user to paste manually on Xwayland
+  apps (warning).
 - `PortAudio` — required for mic capture (critical).
 - `Mic access` — exercises an actual `InputStream` open (warning if denied).
 - `Desktop` — warns when `$XDG_CURRENT_DESKTOP` is not `sway`.
@@ -94,9 +120,13 @@ prompt   = ""                                 # optional hint forwarded to STT
 device   = ""                                 # empty = system default
 
 [inject]
-type      = true                              # invoke wtype
+type      = true                              # invoke wtype (paste keystroke)
 clipboard = true                              # invoke wl-copy
 ```
+
+`inject.type = true` requires `inject.clipboard = true` — the paste keystroke
+needs the transcription on the clipboard first. The daemon refuses to start
+with `type=true, clipboard=false` (exit code `2`).
 
 Edit by hand with `voxd config --edit` (opens `$EDITOR`, falls back to `nano`).
 Comments are preserved across edits made through the daemon (e.g. by

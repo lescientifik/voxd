@@ -9,11 +9,15 @@ The checks fall in two buckets:
 
 * **Critical** (missing → exit code 1, voxd cannot function):
     - ``wtype`` — without it, no synthetic keystrokes, no text injection.
+    - ``wl-copy`` — the injection pipeline is paste-via-Ctrl+V, which needs
+      the transcript on the clipboard first; without ``wl-copy`` the Ctrl+V
+      keystroke pastes the previous clipboard content instead of the
+      transcription.
     - PortAudio (``sounddevice`` importable) — without it, no audio capture.
 
 * **Warning** (missing → exit code stays 0, voxd will work in a degraded mode):
-    - ``wl-copy`` — clipboard mirroring is a fallback, not the primary path.
-    - ``notify-send`` — the daemon still works without on-screen notifications.
+    - ``notify-send`` — the daemon still works without on-screen notifications
+      (only used to nudge the user to paste manually on Xwayland apps).
     - Desktop ≠ sway — wtype actually requires a Wayland compositor with the
       virtual-keyboard protocol; sway is the only one we test against, but
       Hyprland and labwc work too. Warn, don't fail.
@@ -235,8 +239,8 @@ def _run_checks() -> list[_Check]:
         ),
         _check_binary(
             "wl-copy",
-            critical=False,
-            what_for="install `wl-clipboard` — clipboard mirroring will be disabled",
+            critical=True,
+            what_for="install `wl-clipboard` — required for paste-via-Ctrl+V injection",
         ),
         _check_binary(
             "notify-send",
@@ -260,10 +264,10 @@ def main() -> int:
     """Run every diagnostic, print the report, return 0/1 for shell scripts.
 
     Returns:
-        0 if no *critical* dependency is missing (wtype + PortAudio both OK).
-        1 otherwise. Warnings (wl-copy, notify-send, desktop, mic) never
-        flip the exit code — they are informational so the user knows what
-        to expect, but they do not block voxd from running.
+        0 if no *critical* dependency is missing (wtype, wl-copy and
+        PortAudio all OK). 1 otherwise. Warnings (notify-send, desktop, mic)
+        never flip the exit code — they are informational so the user knows
+        what to expect, but they do not block voxd from running.
     """
     checks = _run_checks()
     _print_checks(checks)
