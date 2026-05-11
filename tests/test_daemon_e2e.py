@@ -77,6 +77,41 @@ def _model_path() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# 0. Config validation at construction time
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_rejects_type_true_clipboard_false_at_init(tmp_path: Path) -> None:
+    """``inject.type=True`` with ``clipboard=False`` is rejected at __init__.
+
+    Paste-via-Ctrl+V requires the clipboard to be set first; without
+    ``wl-copy`` we'd be sending Ctrl+V over whatever the user copied last —
+    strictly worse than a no-op. The check belongs in the daemon (the
+    semantics live there) rather than in :class:`Config` (a passive POPO).
+    """
+    cfg = make_test_config(tmp_path, api_key="fake", type_inject=True, clipboard=False)
+    with pytest.raises(ValueError, match="clipboard"):
+        Daemon(cfg, install_signal_handler=False)
+
+
+def test_daemon_accepts_type_false_clipboard_false(tmp_path: Path) -> None:
+    """``type=False`` + ``clipboard=False`` is degenerate but not invalid.
+
+    voxd does nothing useful with this config, but it isn't *inconsistent*:
+    the user has explicitly opted out of both injection channels. We don't
+    second-guess them.
+    """
+    cfg = make_test_config(tmp_path, api_key="fake", type_inject=False, clipboard=False)
+    Daemon(cfg, install_signal_handler=False)
+
+
+def test_daemon_accepts_type_true_clipboard_true(tmp_path: Path) -> None:
+    """Default-shaped config (both flags on) constructs without raising."""
+    cfg = make_test_config(tmp_path, api_key="fake", type_inject=True, clipboard=True)
+    Daemon(cfg, install_signal_handler=False)
+
+
+# ---------------------------------------------------------------------------
 # 1. Full cycle: record → stop → transcribe → inject
 # ---------------------------------------------------------------------------
 

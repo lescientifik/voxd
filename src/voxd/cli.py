@@ -64,10 +64,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_daemon() -> int:
     """Load config and drive :class:`Daemon` until SIGINT or completion.
 
-    Returns ``0`` on a clean shutdown (Ctrl+C, ``stop()``) and ``1`` if the
-    loaded config is missing an API key — in that case we point the user at
-    ``voxd setup`` and refuse to start, rather than producing an opaque
-    ``AuthInvalid`` on the first transcription.
+    Returns ``0`` on a clean shutdown (Ctrl+C, ``stop()``), ``1`` if the
+    loaded config is missing an API key (we point the user at ``voxd setup``
+    rather than producing an opaque ``AuthInvalid`` on the first
+    transcription), and ``2`` if :class:`Daemon` rejects the config as
+    internally inconsistent (e.g. ``inject.type=true`` with ``clipboard=false``).
     """
     cfg = config.load()
     if not cfg.openrouter.api_key:
@@ -77,7 +78,13 @@ def _run_daemon() -> int:
         )
         return 1
 
-    daemon = Daemon(cfg)
+    try:
+        daemon = Daemon(cfg)
+    except ValueError as exc:
+        print(f"voxd: {exc}", file=sys.stderr)
+        print(f"  config file: {config.default_path()}", file=sys.stderr)
+        return 2
+
     try:
         asyncio.run(daemon.run())
     except KeyboardInterrupt:

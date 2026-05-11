@@ -228,3 +228,45 @@ def test_no_args_with_missing_api_key_fails_fast(
     assert run_called == []
     err = capsys.readouterr().err
     assert "voxd setup" in err
+
+
+def test_cli_invalid_inject_config_exits_2_with_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``inject.type=true && clipboard=false`` exits 2 with a clear message.
+
+    The daemon's ``__init__`` raises ``ValueError`` on this config; the CLI
+    must catch it, print to stderr (mentioning ``clipboard`` and the config
+    file path so the user can fix it), and exit 2 — distinct from 1 (runtime)
+    and from argparse's own 2 (usage error).
+    """
+    from voxd import config as config_mod
+    from voxd import daemon as daemon_mod
+
+    cfg = config_mod.Config(
+        openrouter=config_mod.OpenRouterConfig(api_key="sk-test"),
+        audio=config_mod.AudioConfig(),
+        inject=config_mod.InjectConfig(type=True, clipboard=False),
+    )
+    monkeypatch.setattr(config_mod, "load", lambda *a, **kw: cfg)
+
+    expected_path = tmp_path / "voxd" / "config.toml"
+    monkeypatch.setattr(config_mod, "default_path", lambda: expected_path)
+
+    run_called: list[int] = []
+
+    async def fake_run(self: Any) -> None:  # noqa: ARG001
+        run_called.append(1)
+
+    monkeypatch.setattr(daemon_mod.Daemon, "run", fake_run, raising=True)
+
+    rc = cli.main([])
+    assert rc == 2, f"expected exit code 2 for invalid config, got {rc}"
+    assert run_called == [], "Daemon.run must not be called when validation fails"
+    err = capsys.readouterr().err
+    assert "clipboard" in err, f"stderr should mention 'clipboard'; got: {err!r}"
+    assert "config.toml" in err or str(expected_path) in err, (
+        f"stderr should point at the config file; got: {err!r}"
+    )

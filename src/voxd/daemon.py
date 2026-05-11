@@ -132,8 +132,21 @@ class Daemon:
             inject_fn: Override for the inject implementation (test seam).
             transcribe_fn: Override for the transcribe implementation
                 (test seam).
+
+        Raises:
+            ValueError: When the config is internally inconsistent — currently
+                only ``inject.type=True`` with ``inject.clipboard=False``,
+                because paste-via-Ctrl+V requires the clipboard to have been
+                set by ``wl-copy`` first; otherwise we'd be pasting whatever
+                the user copied last, which is strictly worse than no-op.
         """
         self._cfg = cfg
+        if cfg.inject.type and not cfg.inject.clipboard:
+            raise ValueError(
+                "invalid config: inject.type=true requires inject.clipboard=true "
+                "(paste-via-keystroke needs the clipboard to be set first). "
+                "Either set clipboard=true, or set type=false."
+            )
         self._base_url = openrouter_base_url
         self._model_path = model_path if model_path is not None else _default_model_path()
         self._install_signal_handler = install_signal_handler
